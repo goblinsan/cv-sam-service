@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.engine import get_engine
-from app.routers import health, segment
+from app.routers import cv, health, segment
 
 
 @asynccontextmanager
@@ -26,3 +26,4 @@ app = FastAPI(
 
 app.include_router(health.router, prefix="/api")
 app.include_router(segment.router, prefix="/api")
+app.include_router(cv.router, prefix="/api")
