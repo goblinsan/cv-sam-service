@@ -46,7 +46,10 @@ def _mock_response(content: bytes, status_code: int = 200) -> MagicMock:
 def test_analyze_via_image_url(client):
     png = _make_png_bytes()
 
-    with patch("app.utils.requests.get", return_value=_mock_response(png)) as mock_get:
+    with (
+        patch("app.utils._is_safe_host", return_value=True),
+        patch("app.utils.requests.get", return_value=_mock_response(png)) as mock_get,
+    ):
         resp = client.post("/api/analyze?image_url=http://example.com/img.png")
 
     assert resp.status_code == 200
@@ -68,12 +71,22 @@ def test_analyze_bad_scheme_returns_422(client):
     assert "scheme" in resp.json()["detail"].lower()
 
 
+def test_analyze_private_host_returns_422(client):
+    """Requests to private/loopback hosts must be rejected (SSRF mitigation)."""
+    # 127.0.0.1 always resolves to loopback; no network needed
+    resp = client.post("/api/analyze?image_url=http://127.0.0.1/img.png")
+    assert resp.status_code == 422
+
+
 def test_analyze_http_error_returns_422(client):
     err = requests_lib.HTTPError("404 Not Found")
     mock_resp = _mock_response(b"", status_code=404)
     mock_resp.raise_for_status.side_effect = err
 
-    with patch("app.utils.requests.get", return_value=mock_resp):
+    with (
+        patch("app.utils._is_safe_host", return_value=True),
+        patch("app.utils.requests.get", return_value=mock_resp),
+    ):
         resp = client.post("/api/analyze?image_url=http://example.com/missing.png")
 
     assert resp.status_code == 422
@@ -85,7 +98,10 @@ def test_analyze_oversized_image_url_returns_422(client):
     mock_resp = _mock_response(b"x")
     mock_resp.headers = {"content-length": str(11 * 1024 * 1024)}  # 11 MB > 10 MB limit
 
-    with patch("app.utils.requests.get", return_value=mock_resp):
+    with (
+        patch("app.utils._is_safe_host", return_value=True),
+        patch("app.utils.requests.get", return_value=mock_resp),
+    ):
         resp = client.post("/api/analyze?image_url=http://example.com/huge.png")
 
     assert resp.status_code == 422
@@ -100,7 +116,10 @@ def test_analyze_oversized_image_url_returns_422(client):
 def test_extract_palette_via_image_url(client):
     png = _make_png_bytes()
 
-    with patch("app.utils.requests.get", return_value=_mock_response(png)):
+    with (
+        patch("app.utils._is_safe_host", return_value=True),
+        patch("app.utils.requests.get", return_value=_mock_response(png)),
+    ):
         resp = client.post(
             "/api/extract-palette?image_url=http://example.com/img.png&num_colors=3"
         )
@@ -123,7 +142,10 @@ def test_extract_palette_no_image_returns_422(client):
 def test_segment_via_image_url(client):
     png = _make_png_bytes()
 
-    with patch("app.utils.requests.get", return_value=_mock_response(png)):
+    with (
+        patch("app.utils._is_safe_host", return_value=True),
+        patch("app.utils.requests.get", return_value=_mock_response(png)),
+    ):
         resp = client.post("/api/segment?image_url=http://example.com/img.png")
 
     assert resp.status_code == 200
@@ -142,6 +164,12 @@ def test_segment_bad_url_scheme_returns_422(client):
     assert resp.status_code == 422
 
 
+def test_segment_private_host_returns_422(client):
+    """Loopback/private hosts must be blocked on segment endpoints too."""
+    resp = client.post("/api/segment?image_url=http://192.168.1.1/img.png")
+    assert resp.status_code == 422
+
+
 # ---------------------------------------------------------------------------
 # POST /api/segment/auto – image_url
 # ---------------------------------------------------------------------------
@@ -150,7 +178,10 @@ def test_segment_bad_url_scheme_returns_422(client):
 def test_segment_auto_via_image_url(client):
     png = _make_png_bytes()
 
-    with patch("app.utils.requests.get", return_value=_mock_response(png)):
+    with (
+        patch("app.utils._is_safe_host", return_value=True),
+        patch("app.utils.requests.get", return_value=_mock_response(png)),
+    ):
         resp = client.post("/api/segment/auto?image_url=http://example.com/img.png")
 
     assert resp.status_code == 200

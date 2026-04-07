@@ -302,7 +302,7 @@ All errors return a JSON body:
 
 | HTTP status | Meaning |
 |---|---|
-| `422` | Validation error (bad params, invalid JSON, out-of-bounds crop, unsupported URL scheme, image too large, fetch failure) |
+| `422` | Validation error (bad params, invalid JSON, unsupported URL scheme, image too large, fetch failure, private host blocked) |
 | `503` | SAM model not yet ready; retry with back-off |
 
 ---

@@ -1,5 +1,7 @@
 """Shared utility helpers for cv-sam-service."""
 
+import ipaddress
+import socket
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -13,12 +15,45 @@ _ALLOWED_SCHEMES = {"http", "https"}
 _FETCH_TIMEOUT_S = 10
 
 
+def _is_safe_host(hostname: str) -> bool:
+    """Return True only when *hostname* resolves exclusively to public IP addresses.
+
+    Blocks loopback, private, link-local, multicast, and reserved ranges to
+    mitigate Server-Side Request Forgery (SSRF) attacks.
+    """
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return False
+
+    for info in addr_info:
+        raw_ip = info[4][0]
+        # Strip IPv6 zone ID if present (e.g. "fe80::1%eth0")
+        raw_ip = raw_ip.split("%")[0]
+        try:
+            ip = ipaddress.ip_address(raw_ip)
+        except ValueError:
+            return False
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            return False
+
+    return True
+
+
 def fetch_image_bytes(image_url: str) -> bytes:
     """Fetch raw image bytes from *image_url*.
 
-    Validates the URL scheme (http/https only), enforces a 10 MB size cap,
-    and raises :class:`fastapi.HTTPException` (422) on any failure so callers
-    don't need extra error-handling logic.
+    Validates the URL scheme (http/https only), blocks requests to private /
+    internal hosts (SSRF mitigation), enforces a 10 MB size cap, and raises
+    :class:`fastapi.HTTPException` (422) on any failure so callers don't need
+    extra error-handling logic.
     """
     parsed = urlparse(image_url)
     if parsed.scheme not in _ALLOWED_SCHEMES:
@@ -27,6 +62,13 @@ def fetch_image_bytes(image_url: str) -> bytes:
             detail=(
                 f"image_url scheme must be 'http' or 'https', got: {parsed.scheme!r}"
             ),
+        )
+
+    hostname = parsed.hostname or ""
+    if not hostname or not _is_safe_host(hostname):
+        raise HTTPException(
+            status_code=422,
+            detail="image_url must point to a publicly reachable host",
         )
 
     try:
