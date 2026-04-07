@@ -18,6 +18,7 @@ from app.schemas import (
     KulrsPalette,
     PaletteColor,
 )
+from app.utils import resolve_image_bytes
 
 router = APIRouter(tags=["cv"])
 
@@ -157,7 +158,12 @@ def _encode_image(image_rgb: np.ndarray, fmt: str) -> bytes:
 
 @router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze(
-    image: UploadFile = File(..., description="Input image (any common raster format)"),
+    image: Optional[UploadFile] = File(None, description="Input image (any common raster format)"),
+    image_url: Optional[str] = Query(
+        None,
+        description="Public URL of the image to analyze (http/https, max 10 MB). "
+        "Supply either this or the 'image' file upload, not both.",
+    ),
     num_colors: int = Query(
         5, ge=1, le=20, description="Number of dominant colors to extract (k-means k)"
     ),
@@ -167,8 +173,12 @@ async def analyze(
 
     Returns dominant colors (k-means), Canny edge density, per-channel
     histogram statistics, pixel dimensions, and detected image format.
+
+    Provide the image either as a multipart file upload (``image``) or as a
+    publicly reachable URL (``image_url`` query parameter).
     """
-    data = await image.read()
+    upload_bytes = (await image.read()) if image is not None else None
+    data = resolve_image_bytes(upload_bytes, image_url)
     image_rgb, fmt = _load_image_with_format(data)
     h, w = image_rgb.shape[:2]
     channels = image_rgb.shape[2] if image_rgb.ndim == 3 else 1
@@ -249,7 +259,12 @@ async def transform(
 
 @router.post("/extract-palette", response_model=ExtractPaletteResponse)
 async def extract_palette(
-    image: UploadFile = File(..., description="Input image (any common raster format)"),
+    image: Optional[UploadFile] = File(None, description="Input image (any common raster format)"),
+    image_url: Optional[str] = Query(
+        None,
+        description="Public URL of the image to process (http/https, max 10 MB). "
+        "Supply either this or the 'image' file upload, not both.",
+    ),
     num_colors: int = Query(
         6, ge=1, le=32, description="Number of palette colors to extract"
     ),
@@ -262,8 +277,12 @@ async def extract_palette(
 
     Returns hex values, RGB triplets, and frequency weights for each color.
     Pass ``kulrs_format=true`` to also receive a Kulrs-compatible palette object.
+
+    Provide the image either as a multipart file upload (``image``) or as a
+    publicly reachable URL (``image_url`` query parameter).
     """
-    data = await image.read()
+    upload_bytes = (await image.read()) if image is not None else None
+    data = resolve_image_bytes(upload_bytes, image_url)
     image_rgb, _ = _load_image_with_format(data)
 
     raw_colors = _kmeans_colors(image_rgb, k=num_colors)

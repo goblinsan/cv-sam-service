@@ -1,0 +1,652 @@
+openapi: "3.1.0"
+
+# ============================================================================
+# CV SAM Service – Agent Tool Specification
+#
+# Audience:   chat-platform / LLM agent developers
+# Status:     Stable (v1)
+# Base URL:   http://<cv-sam-service-host>:5201
+#
+# This file describes the subset of the CV SAM Service API that is stable
+# and suitable for use as LLM agent tools.  Import it into your agent
+# framework (e.g. OpenAI Function Calling, LangChain tools) to give the
+# agent the ability to analyze images, extract color palettes, and run
+# segmentation.
+#
+# Authentication
+# --------------
+# No authentication is required in the current release.  A future release
+# may add Bearer-token authentication via the Authorization header:
+#
+#   Authorization: Bearer <token>
+#
+# Agent implementations should accept an optional auth_token configuration
+# parameter and forward it as an Authorization header so the upgrade is
+# backward-compatible.
+# ============================================================================
+
+info:
+  title: CV SAM Service
+  version: "1.0"
+  description: >
+    FastAPI service for image analysis, palette extraction, and SAM-based
+    segmentation.  All inference endpoints accept images either as a multipart
+    file upload or as a remote URL via the `image_url` query parameter.
+
+servers:
+  - url: http://localhost:5201
+    description: Local / Docker Compose
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+
+paths:
+
+  /api/health:
+    get:
+      operationId: getHealth
+      summary: Service liveness and model readiness probe
+      description: >
+        Always returns HTTP 200.  The `ready` field indicates whether the SAM
+        model has finished loading.  Agent tools that call segmentation
+        endpoints should check `ready` before proceeding.
+      responses:
+        "200":
+          description: Health status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: "ok"
+                ready: true
+                model_variant: "vit_b"
+                load_error: null
+
+  /api/analyze:
+    post:
+      operationId: analyzeImage
+      summary: Analyze an image – dominant colors, edge density, histogram stats
+      description: >
+        Runs k-means color clustering and Canny edge detection on the supplied
+        image using OpenCV.  No GPU is required.
+
+        **Input limits:**
+          - File upload: any common raster format (JPEG, PNG, WEBP, …)
+          - URL mode (`image_url`): http/https only, maximum **10 MB**, 10 s timeout
+          - `num_colors`: 1–20 (default 5)
+
+        Provide the image via multipart `image` field **or** `image_url` query
+        parameter – not both.
+      parameters:
+        - name: image_url
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uri
+          description: >
+            Public http/https URL of the image to analyze (max 10 MB).
+            Use this when the image is already hosted online.
+        - name: num_colors
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 5
+          description: Number of dominant colors to extract via k-means.
+      requestBody:
+        required: false
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                image:
+                  type: string
+                  format: binary
+                  description: Input image file (use when not supplying image_url).
+      responses:
+        "200":
+          description: Analysis results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyzeResponse"
+              example:
+                width: 1920
+                height: 1080
+                channels: 3
+                format: "JPEG"
+                dominant_colors:
+                  - hex: "#3a5f8c"
+                    rgb: [58, 95, 140]
+                    frequency: 0.3421
+                  - hex: "#e8c47a"
+                    rgb: [232, 196, 122]
+                    frequency: 0.2187
+                  - hex: "#c23b22"
+                    rgb: [194, 59, 34]
+                    frequency: 0.1654
+                  - hex: "#ffffff"
+                    rgb: [255, 255, 255]
+                    frequency: 0.1402
+                  - hex: "#1a1a1a"
+                    rgb: [26, 26, 26]
+                    frequency: 0.1336
+                edge_density: 0.0842
+                histogram_stats:
+                  mean: [112.3, 98.7, 87.1]
+                  std: [54.2, 49.8, 44.3]
+                  min: [0.0, 0.0, 0.0]
+                  max: [255.0, 255.0, 255.0]
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/extract-palette:
+    post:
+      operationId: extractPalette
+      summary: Extract a color palette from an image
+      description: >
+        Runs k-means clustering and returns palette colors sorted by frequency.
+        Optionally returns a Kulrs-compatible palette object.
+
+        **Input limits:**
+          - File upload: any common raster format
+          - URL mode (`image_url`): http/https only, maximum **10 MB**, 10 s timeout
+          - `num_colors`: 1–32 (default 6)
+
+        Provide the image via multipart `image` field **or** `image_url` query
+        parameter – not both.
+      parameters:
+        - name: image_url
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uri
+          description: >
+            Public http/https URL of the image (max 10 MB).
+        - name: num_colors
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 32
+            default: 6
+          description: Number of palette colors to extract.
+        - name: kulrs_format
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: >
+            When true, include a Kulrs-compatible `kulrs` object in the
+            response containing an ordered list of hex strings.
+      requestBody:
+        required: false
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                image:
+                  type: string
+                  format: binary
+                  description: Input image file.
+      responses:
+        "200":
+          description: Extracted palette
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExtractPaletteResponse"
+              examples:
+                without_kulrs:
+                  summary: Default response (kulrs_format=false)
+                  value:
+                    colors:
+                      - hex: "#3a5f8c"
+                        rgb: [58, 95, 140]
+                        weight: 0.3421
+                      - hex: "#e8c47a"
+                        rgb: [232, 196, 122]
+                        weight: 0.2187
+                      - hex: "#c23b22"
+                        rgb: [194, 59, 34]
+                        weight: 0.1654
+                      - hex: "#ffffff"
+                        rgb: [255, 255, 255]
+                        weight: 0.1402
+                      - hex: "#1a1a1a"
+                        rgb: [26, 26, 26]
+                        weight: 0.1336
+                      - hex: "#7b9e6a"
+                        rgb: [123, 158, 106]
+                        weight: 0.0800
+                    kulrs: null
+                with_kulrs:
+                  summary: Response with kulrs_format=true
+                  value:
+                    colors:
+                      - hex: "#3a5f8c"
+                        rgb: [58, 95, 140]
+                        weight: 0.3421
+                      - hex: "#e8c47a"
+                        rgb: [232, 196, 122]
+                        weight: 0.2187
+                    kulrs:
+                      colors:
+                        - "#3a5f8c"
+                        - "#e8c47a"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/segment:
+    post:
+      operationId: segmentImage
+      summary: Run SAM prompted segmentation on an image
+      description: >
+        Uses Meta's Segment Anything Model (SAM) to generate masks for the
+        region indicated by point and/or bounding-box prompts.
+
+        **Requires the SAM model to be loaded** (`GET /api/health` → `ready: true`).
+        Returns HTTP 503 while the model is still warming up.
+
+        **Input limits:**
+          - File upload: any common raster format
+          - URL mode (`image_url`): http/https only, maximum **10 MB**, 10 s timeout
+          - `output_format`: `masks` | `polygons` | `both`
+
+        Provide the image via multipart `image` field **or** `image_url` query
+        parameter – not both.
+      parameters:
+        - name: image_url
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uri
+          description: Public http/https URL of the image (max 10 MB).
+        - name: output_format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [masks, polygons, both]
+            default: masks
+          description: >
+            `masks` – base64-encoded PNG masks only;
+            `polygons` – contour point lists only;
+            `both` – include both representations.
+      requestBody:
+        required: false
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                image:
+                  type: string
+                  format: binary
+                  description: Input image file.
+                point_coords:
+                  type: string
+                  description: >
+                    JSON array of [x, y] point prompts, e.g. `[[320,240]]`.
+                    1-indexed foreground/background determined by `point_labels`.
+                point_labels:
+                  type: string
+                  description: >
+                    JSON array of labels matching `point_coords`.
+                    `1` = foreground, `0` = background.
+                box:
+                  type: string
+                  description: >
+                    JSON array `[x1, y1, x2, y2]` bounding-box prompt.
+                multimask_output:
+                  type: boolean
+                  default: true
+                  description: >
+                    When `true`, SAM returns 3 candidate masks ranked by score.
+      responses:
+        "200":
+          description: Segmentation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SegmentResponse"
+              example:
+                masks:
+                  - "<base64-encoded PNG mask 1>"
+                  - "<base64-encoded PNG mask 2>"
+                  - "<base64-encoded PNG mask 3>"
+                polygons: null
+                scores: [0.95, 0.80, 0.70]
+                processing_time_ms: 312.4
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "503":
+          $ref: "#/components/responses/ModelNotReady"
+
+  /api/segment/auto:
+    post:
+      operationId: segmentImageAuto
+      summary: Run SAM automatic mask generation (no prompt needed)
+      description: >
+        Scans the entire image and returns all detectable segments, sorted by
+        predicted IoU score.
+
+        **Requires the SAM model to be loaded** (`GET /api/health` → `ready: true`).
+
+        **Input limits:**
+          - File upload: any common raster format
+          - URL mode (`image_url`): http/https only, maximum **10 MB**, 10 s timeout
+          - `max_masks`: 1–1000 (default 50)
+      parameters:
+        - name: image_url
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uri
+          description: Public http/https URL of the image (max 10 MB).
+        - name: max_masks
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 50
+          description: Maximum number of segments returned (highest scoring first).
+        - name: output_format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [masks, polygons, both]
+            default: masks
+      requestBody:
+        required: false
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                image:
+                  type: string
+                  format: binary
+                  description: Input image file.
+      responses:
+        "200":
+          description: Auto-segmentation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutoSegmentResponse"
+              example:
+                segments:
+                  - mask: "<base64-encoded PNG mask>"
+                    polygon: null
+                    score: 0.92
+                    stability_score: 0.97
+                    area: 14823
+                    bbox: [42.0, 18.0, 310.0, 275.0]
+                count: 1
+                processing_time_ms: 1840.5
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "503":
+          $ref: "#/components/responses/ModelNotReady"
+
+# ---------------------------------------------------------------------------
+# Components
+# ---------------------------------------------------------------------------
+
+components:
+
+  schemas:
+
+    HealthResponse:
+      type: object
+      required: [status, ready, model_variant]
+      properties:
+        status:
+          type: string
+          description: Always "ok" while the process is running.
+        ready:
+          type: boolean
+          description: True once the SAM model is fully loaded.
+        model_variant:
+          type: string
+          description: SAM model variant in use (vit_b, vit_l, vit_h).
+        load_error:
+          type: string
+          nullable: true
+          description: Error message if model loading failed, otherwise null.
+
+    ColorInfo:
+      type: object
+      required: [hex, rgb, frequency]
+      properties:
+        hex:
+          type: string
+          description: 7-character hex color string, e.g. "#ff0000".
+        rgb:
+          type: array
+          items:
+            type: integer
+          minItems: 3
+          maxItems: 3
+          description: "[R, G, B] integer values 0–255."
+        frequency:
+          type: number
+          description: Fraction of sampled pixels closest to this color.
+
+    HistogramStats:
+      type: object
+      required: [mean, std, min, max]
+      properties:
+        mean:
+          type: array
+          items:
+            type: number
+          description: Per-channel mean pixel value.
+        std:
+          type: array
+          items:
+            type: number
+          description: Per-channel standard deviation.
+        min:
+          type: array
+          items:
+            type: number
+          description: Per-channel minimum pixel value.
+        max:
+          type: array
+          items:
+            type: number
+          description: Per-channel maximum pixel value.
+
+    AnalyzeResponse:
+      type: object
+      required: [width, height, channels, dominant_colors, edge_density, histogram_stats]
+      properties:
+        width:
+          type: integer
+          description: Image width in pixels.
+        height:
+          type: integer
+          description: Image height in pixels.
+        channels:
+          type: integer
+          description: Number of color channels (3 for RGB).
+        format:
+          type: string
+          nullable: true
+          description: Detected image format, e.g. "PNG", "JPEG".
+        dominant_colors:
+          type: array
+          items:
+            $ref: "#/components/schemas/ColorInfo"
+          description: Dominant colors sorted by frequency descending.
+        edge_density:
+          type: number
+          description: Fraction of pixels detected as edges (Canny).
+        histogram_stats:
+          $ref: "#/components/schemas/HistogramStats"
+
+    PaletteColor:
+      type: object
+      required: [hex, rgb, weight]
+      properties:
+        hex:
+          type: string
+          description: 7-character hex color string.
+        rgb:
+          type: array
+          items:
+            type: integer
+          minItems: 3
+          maxItems: 3
+        weight:
+          type: number
+          description: Relative frequency of this color in the image.
+
+    KulrsPalette:
+      type: object
+      required: [colors]
+      properties:
+        colors:
+          type: array
+          items:
+            type: string
+          description: Ordered list of hex color strings.
+
+    ExtractPaletteResponse:
+      type: object
+      required: [colors]
+      properties:
+        colors:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaletteColor"
+          description: Palette colors sorted by weight descending.
+        kulrs:
+          $ref: "#/components/schemas/KulrsPalette"
+          nullable: true
+          description: Kulrs-compatible palette (only present when kulrs_format=true).
+
+    SegmentResponse:
+      type: object
+      required: [scores, processing_time_ms]
+      properties:
+        masks:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Base64-encoded PNG masks, one per predicted mask.
+        polygons:
+          type: array
+          items:
+            type: array
+            items:
+              type: array
+              items:
+                type: number
+          nullable: true
+          description: Polygon contours for each mask as [[x,y],…].
+        scores:
+          type: array
+          items:
+            type: number
+          description: Confidence score per mask (0–1).
+        processing_time_ms:
+          type: number
+          description: Wall-clock time for prediction in milliseconds.
+
+    AutoSegment:
+      type: object
+      required: [score, stability_score, area, bbox]
+      properties:
+        mask:
+          type: string
+          nullable: true
+          description: Base64-encoded PNG mask.
+        polygon:
+          type: array
+          items:
+            type: array
+            items:
+              type: number
+          nullable: true
+          description: Largest contour as [[x,y],…].
+        score:
+          type: number
+          description: Predicted IoU score (0–1).
+        stability_score:
+          type: number
+          description: SAM stability score (0–1).
+        area:
+          type: integer
+          description: Mask area in pixels.
+        bbox:
+          type: array
+          items:
+            type: number
+          minItems: 4
+          maxItems: 4
+          description: "[x, y, w, h] bounding box."
+
+    AutoSegmentResponse:
+      type: object
+      required: [segments, count, processing_time_ms]
+      properties:
+        segments:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutoSegment"
+        count:
+          type: integer
+          description: Number of segments returned.
+        processing_time_ms:
+          type: number
+          description: Wall-clock time for generation in milliseconds.
+
+    ErrorDetail:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: string
+          description: Human-readable error description.
+
+  responses:
+
+    ValidationError:
+      description: >
+        Validation error – bad parameters, unsupported URL scheme, image too
+        large, fetch failure, or malformed JSON.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorDetail"
+          example:
+            detail: "image_url scheme must be 'http' or 'https', got: 'ftp'"
+
+    ModelNotReady:
+      description: >
+        SAM model has not finished loading.  Retry with exponential back-off.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorDetail"
+          example:
+            detail: "Model not ready – please retry shortly"

@@ -13,6 +13,7 @@ from PIL import Image
 
 from app.engine import get_engine
 from app.schemas import AutoSegment, AutoSegmentResponse, SegmentResponse
+from app.utils import resolve_image_bytes
 
 router = APIRouter(tags=["segment"])
 
@@ -61,7 +62,12 @@ def _mask_to_polygon(mask: np.ndarray) -> Optional[List[List[float]]]:
 
 @router.post("/segment", response_model=SegmentResponse)
 async def segment(
-    image: UploadFile = File(..., description="Input image (any common raster format)"),
+    image: Optional[UploadFile] = File(None, description="Input image (any common raster format)"),
+    image_url: Optional[str] = Query(
+        None,
+        description="Public URL of the image to segment (http/https, max 10 MB). "
+        "Supply either this or the 'image' file upload, not both.",
+    ),
     point_coords: Optional[str] = Form(
         None,
         description="JSON array of [x, y] foreground/background point prompts, e.g. [[320,240]]",
@@ -88,6 +94,9 @@ async def segment(
 
     At least one prompt (``point_coords`` or ``box``) should be supplied for
     meaningful results; omitting all prompts asks SAM to segment the whole image.
+
+    Provide the image either as a multipart file upload (``image``) or as a
+    publicly reachable URL (``image_url`` query parameter).
     """
     engine = get_engine()
     if not engine.ready:
@@ -113,8 +122,9 @@ async def segment(
     if box is not None:
         np_box = np.array(json.loads(box), dtype=np.float32)
 
-    # --- run prediction -------------------------------------------------
-    image_bytes = await image.read()
+    # --- resolve image --------------------------------------------------
+    upload_bytes = (await image.read()) if image is not None else None
+    image_bytes = resolve_image_bytes(upload_bytes, image_url)
     image_array = _load_image(image_bytes)
 
     t0 = time.perf_counter()
@@ -151,7 +161,12 @@ async def segment(
 
 @router.post("/segment/auto", response_model=AutoSegmentResponse)
 async def segment_auto(
-    image: UploadFile = File(..., description="Input image (any common raster format)"),
+    image: Optional[UploadFile] = File(None, description="Input image (any common raster format)"),
+    image_url: Optional[str] = Query(
+        None,
+        description="Public URL of the image to segment (http/https, max 10 MB). "
+        "Supply either this or the 'image' file upload, not both.",
+    ),
     max_masks: int = Query(
         50,
         ge=1,
@@ -168,6 +183,9 @@ async def segment_auto(
 
     Returns up to ``max_masks`` detected segments, sorted by predicted IoU
     score (highest first).
+
+    Provide the image either as a multipart file upload (``image``) or as a
+    publicly reachable URL (``image_url`` query parameter).
     """
     engine = get_engine()
     if not engine.ready:
@@ -179,7 +197,8 @@ async def segment_auto(
             detail="output_format must be 'masks', 'polygons', or 'both'",
         )
 
-    image_bytes = await image.read()
+    upload_bytes = (await image.read()) if image is not None else None
+    image_bytes = resolve_image_bytes(upload_bytes, image_url)
     image_array = _load_image(image_bytes)
 
     t0 = time.perf_counter()
