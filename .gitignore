@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+.env
+*.env
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# model weights (downloaded at runtime, not committed)
+/data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Docker
+.dockerignore
