@@ -69,3 +69,53 @@ class AutoSegmentResponse(BaseModel):
     segments: List[AutoSegment]
     count: int = Field(..., description="Number of segments returned")
     processing_time_ms: float = Field(..., description="Wall-clock time for generation (ms)")
+
+
+# ---------------------------------------------------------------------------
+# Analyze
+# ---------------------------------------------------------------------------
+
+
+class ColorInfo(BaseModel):
+    hex: str = Field(..., description="Hex color string, e.g. '#ff0000'")
+    rgb: List[int] = Field(..., description="[R, G, B] integer values 0–255")
+    frequency: float = Field(..., description="Fraction of sampled pixels closest to this color")
+
+
+class HistogramStats(BaseModel):
+    mean: List[float] = Field(..., description="Per-channel mean pixel value")
+    std: List[float] = Field(..., description="Per-channel standard deviation")
+    min: List[float] = Field(..., description="Per-channel minimum pixel value")
+    max: List[float] = Field(..., description="Per-channel maximum pixel value")
+
+
+class AnalyzeResponse(BaseModel):
+    width: int = Field(..., description="Image width in pixels")
+    height: int = Field(..., description="Image height in pixels")
+    channels: int = Field(..., description="Number of color channels")
+    format: Optional[str] = Field(None, description="Detected image format, e.g. 'PNG', 'JPEG'")
+    dominant_colors: List[ColorInfo] = Field(..., description="Dominant colors sorted by frequency")
+    edge_density: float = Field(..., description="Fraction of pixels detected as edges (Canny)")
+    histogram_stats: HistogramStats
+
+
+# ---------------------------------------------------------------------------
+# Extract-palette
+# ---------------------------------------------------------------------------
+
+
+class PaletteColor(BaseModel):
+    hex: str = Field(..., description="Hex color string, e.g. '#ff0000'")
+    rgb: List[int] = Field(..., description="[R, G, B] integer values 0–255")
+    weight: float = Field(..., description="Relative frequency of this color in the image")
+
+
+class KulrsPalette(BaseModel):
+    colors: List[str] = Field(..., description="Ordered list of hex color strings")
+
+
+class ExtractPaletteResponse(BaseModel):
+    colors: List[PaletteColor] = Field(..., description="Palette colors sorted by weight descending")
+    kulrs: Optional[KulrsPalette] = Field(
+        None, description="Kulrs-compatible palette (only present when kulrs_format=true)"
+    )
