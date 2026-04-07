@@ -35,6 +35,19 @@ open http://localhost:5201/docs
 | `GET` | `/api/info` | GPU info, VRAM usage, model variant, readiness |
 | `POST` | `/api/segment` | Prompted segmentation (point / box prompts) |
 | `POST` | `/api/segment/auto` | Automatic mask generation (no prompts required) |
+| `POST` | `/api/analyze` | Dominant colors, edge density, histogram stats |
+| `POST` | `/api/extract-palette` | Color palette extraction (k-means) |
+| `POST` | `/api/transform` | Image transform pipeline (resize, crop, rotate, …) |
+
+### Image input
+
+Every inference endpoint (`segment`, `segment/auto`, `analyze`,
+`extract-palette`) accepts images in two ways:
+
+* **Multipart file upload** – include the image as a `multipart/form-data`
+  `image` field.
+* **Remote URL** – pass `?image_url=https://…` as a query parameter.
+  The service fetches the image (http/https only, max 10 MB, 10 s timeout).
 
 ### POST /api/segment
 
@@ -42,13 +55,13 @@ Accepts `multipart/form-data`:
 
 | Field | Type | Description |
 |---|---|---|
-| `image` | file | Input image (JPEG, PNG, …) |
+| `image` | file | Input image (JPEG, PNG, …) – or use `image_url` |
 | `point_coords` | string (JSON) | `[[x, y], …]` – foreground/background point prompts |
 | `point_labels` | string (JSON) | `[1, 0, …]` – `1` = foreground, `0` = background |
 | `box` | string (JSON) | `[x1, y1, x2, y2]` – bounding-box prompt |
 | `multimask_output` | bool (form) | Return 3 candidate masks (default `true`) |
 
-Query parameter: `output_format` – `masks` (base64 PNG), `polygons`, or `both` (default `masks`).
+Query parameters: `output_format` – `masks` (base64 PNG), `polygons`, or `both` (default `masks`); `image_url` – remote image URL.
 
 ### POST /api/segment/auto
 
@@ -56,9 +69,17 @@ Accepts `multipart/form-data`:
 
 | Field | Type | Description |
 |---|---|---|
-| `image` | file | Input image |
+| `image` | file | Input image – or use `image_url` |
 
-Query parameters: `max_masks` (default `50`), `output_format` (same as above).
+Query parameters: `max_masks` (default `50`), `output_format` (same as above), `image_url`.
+
+## Integration docs
+
+| Document | Audience | Description |
+|---|---|---|
+| `docs/workflow-action-contract.md` | gateway-api workflow authors | Request/response contract, examples (URL + upload), downstream patterns |
+| `docs/agent-tool-openapi.yml` | chat-platform / LLM agent developers | OpenAPI 3.1 spec with input limits, auth notes, stable response examples |
+| `docs/workload-manifest.example.yml` | gateway-control-plane operators | Container workload manifest |
 
 ## Control-plane deployment
 
