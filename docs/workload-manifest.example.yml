@@ -1,0 +1,42 @@
+# Example gateway-control-plane workload manifest for cv-sam-service.
+#
+# Copy this file into your local gateway.config.json workloads array (or the
+# equivalent Nodes-tab form) and fill in the values marked <REPLACE_ME>.
+# Do NOT commit a filled-in copy of this file to the repository.
+
+name: cv-sam-service
+type: container-service
+
+build:
+  strategy: repo-compose
+  repo: https://github.com/goblinsan/cv-sam-service   # <REPLACE_ME: use your fork/mirror URL if needed>
+  branch: main
+
+runtime:
+  networkMode: bridge
+  runtimeClass: nvidia
+  publishedPorts:
+    - host: 5201
+      container: 5201
+      protocol: tcp
+
+# Environment contract – these variables are forwarded into the container.
+# MODEL_DIR must match the volume mount path below so the checkpoint survives restarts.
+env:
+  CV_SAM_VARIANT: vit_b          # vit_b (~1.5 GB VRAM) | vit_l | vit_h (~2.5 GB VRAM)
+  MODEL_DIR: /data/models/sam    # must match the volume mount target
+
+# Volume contract – mount a durable host path so the SAM checkpoint is not
+# re-downloaded on every container restart.
+volumes:
+  - hostPath: /data/models       # <REPLACE_ME: choose a durable path on the node>
+    containerPath: /data/models
+
+healthCheck:
+  type: http
+  path: /api/health
+  port: 5201
+  intervalSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 5
+  startPeriodSeconds: 120
