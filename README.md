@@ -24,6 +24,7 @@ open http://localhost:5201/docs
 | Variable | Default | Description |
 |---|---|---|
 | `CV_SAM_VARIANT` | `vit_b` | SAM model variant: `vit_b` (~1.5 GB VRAM), `vit_l`, or `vit_h` (~2.5 GB VRAM) |
+| `MODELS_HOST_DIR` | `/data/models` | Host path mounted to `/data/models` inside the container |
 | `MODEL_DIR` | `/data/models/sam` | Directory where SAM checkpoint is cached |
 | `HOST_PORT` | `5201` | Host port mapped in `docker-compose.yml` |
 

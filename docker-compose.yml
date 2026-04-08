@@ -7,9 +7,9 @@ services:
       - "${HOST_PORT:-5201}:5201"
     environment:
       - CV_SAM_VARIANT=${CV_SAM_VARIANT:-vit_b}
-      - MODEL_DIR=/data/models/sam
+      - MODEL_DIR=${MODEL_DIR:-/data/models/sam}
     volumes:
-      - /data/models:/data/models
+      - "${MODELS_HOST_DIR:-/data/models}:/data/models"
     deploy:
       resources:
         reservations:
