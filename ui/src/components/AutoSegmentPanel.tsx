@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { segmentAuto } from '../api/client'
-import type { AutoSegment, AutoSegmentResponse, ImageMeta } from '../types'
+import type { ActionType, AutoSegment, AutoSegmentResponse, ImageMeta } from '../types'
+import { downloadCsv, downloadJson } from '../utils/exportUtils'
 
 const SEG_COLORS = [
   '#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4',
@@ -9,13 +10,14 @@ const SEG_COLORS = [
 
 interface Props {
   image: ImageMeta | null
+  onResult: (entry: { imageName: string; action: ActionType; summary: string }) => void
 }
 
 function colorForIndex(i: number): string {
   return SEG_COLORS[i % SEG_COLORS.length]
 }
 
-export function AutoSegmentPanel({ image }: Props) {
+export function AutoSegmentPanel({ image, onResult }: Props) {
   const imgRef = useRef<HTMLImageElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -25,6 +27,7 @@ export function AutoSegmentPanel({ image }: Props) {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [splitView, setSplitView] = useState(false)
 
   const handleRun = async () => {
     if (!image) return
@@ -39,6 +42,11 @@ export function AutoSegmentPanel({ image }: Props) {
         outputFormat,
       })
       setResult(res)
+      onResult({
+        imageName: image.file.name,
+        action: 'auto-segment',
+        summary: `${res.count} segment${res.count !== 1 ? 's' : ''} · ${res.processing_time_ms.toFixed(0)} ms`,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -102,6 +110,31 @@ export function AutoSegmentPanel({ image }: Props) {
     maskImg.src = `data:image/png;base64,${seg.mask}`
   }
 
+  // ── Export helpers ──────────────────────────────────────────────────────────
+
+  const handleExportJson = () => {
+    if (!result || !image) return
+    downloadJson(result, `auto_segment_${image.file.name.replace(/\.[^.]+$/, '')}.json`)
+  }
+
+  const handleExportCsv = () => {
+    if (!result || !image) return
+    const stem = image.file.name.replace(/\.[^.]+$/, '')
+    const rows: (string | number)[][] = [
+      ['index', 'score', 'stability_score', 'area', 'bbox_x', 'bbox_y', 'bbox_w', 'bbox_h'],
+    ]
+    result.segments.forEach((seg, i) =>
+      rows.push([
+        i + 1,
+        seg.score.toFixed(4),
+        seg.stability_score.toFixed(4),
+        seg.area,
+        ...seg.bbox.map((v) => Math.round(v)),
+      ]),
+    )
+    downloadCsv(rows, `auto_segments_${stem}.csv`)
+  }
+
   const canvasWidth = 640
   const canvasHeight = image ? Math.round((image.height / image.width) * canvasWidth) : 360
 
@@ -122,6 +155,12 @@ export function AutoSegmentPanel({ image }: Props) {
 
       {!image && <p className="hint-msg">Load an image above to begin.</p>}
       {error && <p className="error-msg">{error}</p>}
+
+      {loading && (
+        <div className="loading-bar" role="status" aria-label="Running auto segmentation">
+          <span className="loading-bar__fill" />
+        </div>
+      )}
 
       {image && (
         <>
@@ -152,23 +191,53 @@ export function AutoSegmentPanel({ image }: Props) {
                 <option value="both">Both</option>
               </select>
             </div>
+            <div className="seg-controls__group">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={splitView}
+                  onChange={(e) => setSplitView(e.target.checked)}
+                />
+                Side-by-side
+              </label>
+            </div>
           </div>
 
-          {/* Canvas */}
-          <div className="canvas-wrap">
-            <img
-              ref={imgRef}
-              src={image.previewUrl}
-              alt=""
-              style={{ display: 'none' }}
-              onLoad={() => drawMaskOverlay(selectedIdx)}
-            />
-            <canvas
-              ref={canvasRef}
-              width={canvasWidth}
-              height={canvasHeight}
-              className="seg-canvas"
-            />
+          {/* Hidden reference image for canvas drawing */}
+          <img
+            ref={imgRef}
+            src={image.previewUrl}
+            alt=""
+            style={{ display: 'none' }}
+            onLoad={() => drawMaskOverlay(selectedIdx)}
+          />
+
+          {/* Canvas with optional split view */}
+          <div className={splitView ? 'split-view' : undefined}>
+            {splitView && (
+              <div className="split-view__pane">
+                <p className="split-view__label">Original</p>
+                <div className="canvas-wrap">
+                  <img
+                    src={image.previewUrl}
+                    alt="Original"
+                    className="seg-canvas"
+                    style={{ width: canvasWidth, height: canvasHeight, objectFit: 'contain' }}
+                  />
+                </div>
+              </div>
+            )}
+            <div className={splitView ? 'split-view__pane' : undefined}>
+              {splitView && <p className="split-view__label">Result</p>}
+              <div className="canvas-wrap">
+                <canvas
+                  ref={canvasRef}
+                  width={canvasWidth}
+                  height={canvasHeight}
+                  className="seg-canvas"
+                />
+              </div>
+            </div>
           </div>
         </>
       )}
@@ -230,6 +299,13 @@ export function AutoSegmentPanel({ image }: Props) {
               </dl>
             </div>
           )}
+
+          {/* Export bar */}
+          <div className="export-bar">
+            <span className="export-bar__label">Export</span>
+            <button className="btn btn--sm" onClick={handleExportJson}>↓ JSON</button>
+            <button className="btn btn--sm" onClick={handleExportCsv}>↓ CSV</button>
+          </div>
         </div>
       )}
     </section>

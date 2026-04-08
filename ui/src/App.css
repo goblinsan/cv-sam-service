@@ -835,3 +835,121 @@ body {
   word-break: break-all;
   white-space: pre-wrap;
 }
+
+/* ── Export bar ───────────────────────────────────────────────────────────── */
+.export-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+
+.export-bar__label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  margin-right: 0.25rem;
+}
+
+/* ── Loading bar ──────────────────────────────────────────────────────────── */
+.loading-bar {
+  height: 3px;
+  background: var(--color-border);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+}
+
+.loading-bar__fill {
+  display: block;
+  height: 100%;
+  width: 40%;
+  background: var(--color-accent);
+  border-radius: 999px;
+  animation: loading-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes loading-sweep {
+  0%   { transform: translateX(-150%); }
+  100% { transform: translateX(350%); }
+}
+
+/* ── Split view ───────────────────────────────────────────────────────────── */
+.split-view {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.split-view__pane {
+  flex: 1 1 300px;
+  min-width: 0;
+}
+
+.split-view__label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  margin-bottom: 0.35rem;
+}
+
+/* ── Session history ──────────────────────────────────────────────────────── */
+.history-panel {
+  margin-top: 0.5rem;
+}
+
+.history-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.history-entry {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr) minmax(0, 1.5fr) auto;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+  padding: 0.45rem 0.25rem;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.82rem;
+}
+
+.history-entry:last-child {
+  border-bottom: none;
+}
+
+.history-entry__action {
+  font-weight: 600;
+  color: var(--color-accent-hover);
+  white-space: nowrap;
+}
+
+.history-entry__image {
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.78rem;
+}
+
+.history-entry__summary {
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-entry__time {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { segment } from '../api/client'
-import type { ImageMeta, SegmentResponse } from '../types'
+import type { ActionType, ImageMeta, SegmentResponse } from '../types'
+import { downloadCanvas, downloadCsv, downloadJson } from '../utils/exportUtils'
 
 // Colors for overlaying up to 3 masks
 const MASK_COLORS = [
@@ -17,6 +18,7 @@ interface ClickPoint {
 
 interface Props {
   image: ImageMeta | null
+  onResult: (entry: { imageName: string; action: ActionType; summary: string }) => void
 }
 
 function drawOverlay(
@@ -94,7 +96,7 @@ function drawOverlay(
   }
 }
 
-export function SegmentPanel({ image }: Props) {
+export function SegmentPanel({ image, onResult }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imgRef = useRef<HTMLImageElement | null>(null)
   const [points, setPoints] = useState<ClickPoint[]>([])
@@ -108,6 +110,7 @@ export function SegmentPanel({ image }: Props) {
   const [activeMask, setActiveMask] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [splitView, setSplitView] = useState(false)
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current
@@ -194,6 +197,11 @@ export function SegmentPanel({ image }: Props) {
         outputFormat,
       })
       setResult(res)
+      onResult({
+        imageName: image.file.name,
+        action: 'segment',
+        summary: `${res.scores.length} mask${res.scores.length !== 1 ? 's' : ''} · ${res.processing_time_ms.toFixed(0)} ms`,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -207,6 +215,27 @@ export function SegmentPanel({ image }: Props) {
     setResult(null)
     setActiveMask(null)
     setError(null)
+  }
+
+  // ── Export helpers ──────────────────────────────────────────────────────────
+
+  const handleExportJson = () => {
+    if (!result || !image) return
+    downloadJson(result, `segment_${image.file.name.replace(/\.[^.]+$/, '')}.json`)
+  }
+
+  const handleExportCsv = () => {
+    if (!result || !image) return
+    const stem = image.file.name.replace(/\.[^.]+$/, '')
+    const rows: (string | number)[][] = [['mask_index', 'score']]
+    result.scores.forEach((score, i) => rows.push([i + 1, score.toFixed(4)]))
+    downloadCsv(rows, `segment_scores_${stem}.csv`)
+  }
+
+  const handleExportPng = () => {
+    const canvas = canvasRef.current
+    if (!canvas || !image) return
+    downloadCanvas(canvas, `segment_overlay_${image.file.name.replace(/\.[^.]+$/, '')}.png`)
   }
 
   const canvasWidth = 640
@@ -237,6 +266,12 @@ export function SegmentPanel({ image }: Props) {
       )}
 
       {error && <p className="error-msg">{error}</p>}
+
+      {loading && (
+        <div className="loading-bar" role="status" aria-label="Running segmentation">
+          <span className="loading-bar__fill" />
+        </div>
+      )}
 
       {image && (
         <>
@@ -278,21 +313,49 @@ export function SegmentPanel({ image }: Props) {
                 Multi-mask
               </label>
             </div>
+            <div className="seg-controls__group">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={splitView}
+                  onChange={(e) => setSplitView(e.target.checked)}
+                />
+                Side-by-side
+              </label>
+            </div>
           </div>
 
-          {/* Canvas */}
-          <div className="canvas-wrap">
-            <canvas
-              ref={canvasRef}
-              width={canvasWidth}
-              height={canvasHeight}
-              className="seg-canvas"
-              style={{ cursor: pointMode === 'box' ? 'crosshair' : 'cell' }}
-              onMouseDown={handleCanvasMouseDown}
-              onMouseMove={handleCanvasMouseMove}
-              onMouseUp={handleCanvasMouseUp}
-              onMouseLeave={handleCanvasMouseUp}
-            />
+          {/* Canvas (and optional original side-by-side) */}
+          <div className={splitView ? 'split-view' : undefined}>
+            {splitView && (
+              <div className="split-view__pane">
+                <p className="split-view__label">Original</p>
+                <div className="canvas-wrap">
+                  <img
+                    src={image.previewUrl}
+                    alt="Original"
+                    className="seg-canvas"
+                    style={{ width: canvasWidth, height: canvasHeight, objectFit: 'contain' }}
+                  />
+                </div>
+              </div>
+            )}
+            <div className={splitView ? 'split-view__pane' : undefined}>
+              {splitView && <p className="split-view__label">Result</p>}
+              <div className="canvas-wrap">
+                <canvas
+                  ref={canvasRef}
+                  width={canvasWidth}
+                  height={canvasHeight}
+                  className="seg-canvas"
+                  style={{ cursor: pointMode === 'box' ? 'crosshair' : 'cell' }}
+                  onMouseDown={handleCanvasMouseDown}
+                  onMouseMove={handleCanvasMouseMove}
+                  onMouseUp={handleCanvasMouseUp}
+                  onMouseLeave={handleCanvasMouseUp}
+                />
+              </div>
+            </div>
           </div>
 
           {/* Prompt summary */}
@@ -336,6 +399,14 @@ export function SegmentPanel({ image }: Props) {
                 <span className="mask-chip__score">{(score * 100).toFixed(1)}%</span>
               </button>
             ))}
+          </div>
+
+          {/* Export bar */}
+          <div className="export-bar">
+            <span className="export-bar__label">Export</span>
+            <button className="btn btn--sm" onClick={handleExportJson}>↓ JSON</button>
+            <button className="btn btn--sm" onClick={handleExportCsv}>↓ CSV</button>
+            <button className="btn btn--sm" onClick={handleExportPng}>↓ PNG overlay</button>
           </div>
         </div>
       )}

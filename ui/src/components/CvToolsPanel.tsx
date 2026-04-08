@@ -1,17 +1,19 @@
 import { useState } from 'react'
 import { analyze, extractPalette, transform } from '../api/client'
-import type { AnalyzeResponse, ExtractPaletteResponse, ImageMeta } from '../types'
+import type { ActionType, AnalyzeResponse, ExtractPaletteResponse, ImageMeta } from '../types'
 import type { TransformOp } from '../api/client'
+import { downloadCsv, downloadJson } from '../utils/exportUtils'
 
 interface Props {
   image: ImageMeta | null
+  onResult: (entry: { imageName: string; action: ActionType; summary: string }) => void
 }
 
 // ---------------------------------------------------------------------------
 // Analyze tab
 // ---------------------------------------------------------------------------
 
-function AnalyzeTab({ image }: Props) {
+function AnalyzeTab({ image, onResult }: Props) {
   const [numColors, setNumColors] = useState(5)
   const [result, setResult] = useState<AnalyzeResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -22,12 +24,33 @@ function AnalyzeTab({ image }: Props) {
     setLoading(true)
     setError(null)
     try {
-      setResult(await analyze({ image: image.file, numColors }))
+      const res = await analyze({ image: image.file, numColors })
+      setResult(res)
+      onResult({
+        imageName: image.file.name,
+        action: 'analyze',
+        summary: `${res.width}×${res.height} · ${res.dominant_colors.length} colors · edge ${(res.edge_density * 100).toFixed(1)}%`,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleExportJson = () => {
+    if (!result || !image) return
+    downloadJson(result, `analyze_${image.file.name.replace(/\.[^.]+$/, '')}.json`)
+  }
+
+  const handleExportCsv = () => {
+    if (!result || !image) return
+    const stem = image.file.name.replace(/\.[^.]+$/, '')
+    const rows: (string | number)[][] = [['hex', 'r', 'g', 'b', 'frequency']]
+    result.dominant_colors.forEach((c) =>
+      rows.push([c.hex, c.rgb[0], c.rgb[1], c.rgb[2], c.frequency.toFixed(4)]),
+    )
+    downloadCsv(rows, `analyze_colors_${stem}.csv`)
   }
 
   return (
@@ -56,6 +79,11 @@ function AnalyzeTab({ image }: Props) {
         </button>
       </div>
       {error && <p className="error-msg">{error}</p>}
+      {loading && (
+        <div className="loading-bar" role="status" aria-label="Analyzing image">
+          <span className="loading-bar__fill" />
+        </div>
+      )}
 
       {result && (
         <div className="cv-result">
@@ -102,6 +130,12 @@ function AnalyzeTab({ image }: Props) {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          <div className="export-bar">
+            <span className="export-bar__label">Export</span>
+            <button className="btn btn--sm" onClick={handleExportJson}>↓ JSON</button>
+            <button className="btn btn--sm" onClick={handleExportCsv}>↓ CSV (colors)</button>
           </div>
         </div>
       )}
@@ -178,7 +212,7 @@ function OpRow({
   )
 }
 
-function TransformTab({ image }: Props) {
+function TransformTab({ image, onResult }: Props) {
   const [ops, setOps] = useState<TransformOp[]>([])
   const [outputFormat, setOutputFormat] = useState<'PNG' | 'JPEG' | 'WEBP'>('PNG')
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -204,6 +238,11 @@ function TransformTab({ image }: Props) {
     try {
       const blob = await transform({ image: image.file, operations: ops, outputFormat })
       setPreviewUrl(URL.createObjectURL(blob))
+      onResult({
+        imageName: image.file.name,
+        action: 'transform',
+        summary: `${ops.length} op${ops.length !== 1 ? 's' : ''} → ${outputFormat}`,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -246,6 +285,11 @@ function TransformTab({ image }: Props) {
       </div>
 
       {error && <p className="error-msg">{error}</p>}
+      {loading && (
+        <div className="loading-bar" role="status" aria-label="Transforming image">
+          <span className="loading-bar__fill" />
+        </div>
+      )}
 
       {previewUrl && (
         <div className="transform-preview">
@@ -269,7 +313,7 @@ function TransformTab({ image }: Props) {
 // Palette tab
 // ---------------------------------------------------------------------------
 
-function PaletteTab({ image }: Props) {
+function PaletteTab({ image, onResult }: Props) {
   const [numColors, setNumColors] = useState(6)
   const [kulrsFormat, setKulrsFormat] = useState(false)
   const [result, setResult] = useState<ExtractPaletteResponse | null>(null)
@@ -281,12 +325,33 @@ function PaletteTab({ image }: Props) {
     setLoading(true)
     setError(null)
     try {
-      setResult(await extractPalette({ image: image.file, numColors, kulrsFormat }))
+      const res = await extractPalette({ image: image.file, numColors, kulrsFormat })
+      setResult(res)
+      onResult({
+        imageName: image.file.name,
+        action: 'palette',
+        summary: `${res.colors.length} color${res.colors.length !== 1 ? 's' : ''}`,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleExportJson = () => {
+    if (!result || !image) return
+    downloadJson(result, `palette_${image.file.name.replace(/\.[^.]+$/, '')}.json`)
+  }
+
+  const handleExportCsv = () => {
+    if (!result || !image) return
+    const stem = image.file.name.replace(/\.[^.]+$/, '')
+    const rows: (string | number)[][] = [['hex', 'r', 'g', 'b', 'weight']]
+    result.colors.forEach((c) =>
+      rows.push([c.hex, c.rgb[0], c.rgb[1], c.rgb[2], c.weight.toFixed(4)]),
+    )
+    downloadCsv(rows, `palette_${stem}.csv`)
   }
 
   return (
@@ -326,6 +391,11 @@ function PaletteTab({ image }: Props) {
       </div>
 
       {error && <p className="error-msg">{error}</p>}
+      {loading && (
+        <div className="loading-bar" role="status" aria-label="Extracting palette">
+          <span className="loading-bar__fill" />
+        </div>
+      )}
 
       {result && (
         <div className="cv-result">
@@ -352,6 +422,12 @@ function PaletteTab({ image }: Props) {
               <code className="kulrs-json">{JSON.stringify(result.kulrs.colors)}</code>
             </div>
           )}
+
+          <div className="export-bar">
+            <span className="export-bar__label">Export</span>
+            <button className="btn btn--sm" onClick={handleExportJson}>↓ JSON</button>
+            <button className="btn btn--sm" onClick={handleExportCsv}>↓ CSV</button>
+          </div>
         </div>
       )}
     </div>
@@ -364,7 +440,7 @@ function PaletteTab({ image }: Props) {
 
 type CvTab = 'analyze' | 'transform' | 'palette'
 
-export function CvToolsPanel({ image }: Props) {
+export function CvToolsPanel({ image, onResult }: Props) {
   const [activeTab, setActiveTab] = useState<CvTab>('analyze')
 
   return (
@@ -388,9 +464,9 @@ export function CvToolsPanel({ image }: Props) {
       </div>
 
       <div className="inner-tab-content">
-        {activeTab === 'analyze' && <AnalyzeTab image={image} />}
-        {activeTab === 'transform' && <TransformTab image={image} />}
-        {activeTab === 'palette' && <PaletteTab image={image} />}
+        {activeTab === 'analyze' && <AnalyzeTab image={image} onResult={onResult} />}
+        {activeTab === 'transform' && <TransformTab image={image} onResult={onResult} />}
+        {activeTab === 'palette' && <PaletteTab image={image} onResult={onResult} />}
       </div>
     </section>
   )
