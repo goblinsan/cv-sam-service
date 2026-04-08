@@ -15,6 +15,8 @@ build:
 runtime:
   networkMode: bridge
   runtimeClass: nvidia
+  # A single port is sufficient: the FastAPI process serves both the REST API
+  # (at /api/*) and the pre-built React SPA (at /) on the same container port.
   publishedPorts:
     - host: 5201
       container: 5201
