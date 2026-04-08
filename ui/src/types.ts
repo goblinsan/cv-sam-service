@@ -95,3 +95,17 @@ export interface ExtractPaletteResponse {
   colors: PaletteColor[];
   kulrs: { colors: string[] } | null;
 }
+
+// ---------------------------------------------------------------------------
+// Session history
+// ---------------------------------------------------------------------------
+
+export type ActionType = 'segment' | 'auto-segment' | 'analyze' | 'palette' | 'transform'
+
+export interface SessionEntry {
+  id: string;
+  imageName: string;
+  action: ActionType;
+  timestamp: string;
+  summary: string;
+}
