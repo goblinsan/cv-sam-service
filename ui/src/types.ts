@@ -23,3 +23,75 @@ export interface ImageMeta {
   format: string;
   previewUrl: string;
 }
+
+// ---------------------------------------------------------------------------
+// Segment (prompted)
+// ---------------------------------------------------------------------------
+
+export interface SegmentResponse {
+  masks: string[] | null;
+  polygons: number[][][] | null;
+  scores: number[];
+  processing_time_ms: number;
+}
+
+// ---------------------------------------------------------------------------
+// Auto-segment
+// ---------------------------------------------------------------------------
+
+export interface AutoSegment {
+  mask: string | null;
+  polygon: number[][] | null;
+  score: number;
+  stability_score: number;
+  area: number;
+  bbox: [number, number, number, number];
+}
+
+export interface AutoSegmentResponse {
+  segments: AutoSegment[];
+  count: number;
+  processing_time_ms: number;
+}
+
+// ---------------------------------------------------------------------------
+// Analyze
+// ---------------------------------------------------------------------------
+
+export interface ColorInfo {
+  hex: string;
+  rgb: [number, number, number];
+  frequency: number;
+}
+
+export interface HistogramStats {
+  mean: number[];
+  std: number[];
+  min: number[];
+  max: number[];
+}
+
+export interface AnalyzeResponse {
+  width: number;
+  height: number;
+  channels: number;
+  format: string | null;
+  dominant_colors: ColorInfo[];
+  edge_density: number;
+  histogram_stats: HistogramStats;
+}
+
+// ---------------------------------------------------------------------------
+// Extract-palette
+// ---------------------------------------------------------------------------
+
+export interface PaletteColor {
+  hex: string;
+  rgb: [number, number, number];
+  weight: number;
+}
+
+export interface ExtractPaletteResponse {
+  colors: PaletteColor[];
+  kulrs: { colors: string[] } | null;
+}
