@@ -24,3 +24,8 @@ htmlcov/
 
 # Docker
 .dockerignore
+
+# UI build artefacts and local install
+ui/node_modules/
+ui/dist/
+app/static/
