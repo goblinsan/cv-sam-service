@@ -32,6 +32,40 @@ is served from the root path (`/`) by the FastAPI process:
 | Service status panel | Polls `/api/health` and `/api/info` every 10 s; shows SAM variant, GPU readiness, VRAM metrics |
 | Image workspace | Drag-and-drop upload (PNG · JPEG · WebP), thumbnail preview, dimensions/format/size metadata, replace and clear actions |
 
+### Compose service routing
+
+The `docker-compose.yml` defines a **single service** (`cv-sam-api`).  There
+is no separate UI container — the pre-built React SPA is embedded in the API
+image during the multi-stage Docker build and served by the FastAPI process on
+the same port (`5201`):
+
+| Path prefix | Handler |
+|---|---|
+| `/api/*` | FastAPI routers (inference, health, info) |
+| `/assets/*` | Vite build artifacts (JS, CSS, fonts) |
+| `/*` | SPA fallback → `index.html` |
+
+Under gateway-control-plane the stack deploys as a single `container-service`
+using `build.strategy: repo-compose`.  Only container port `5201` needs to be
+published to the host — both the API and the browser UI are accessible on
+that port.
+
+### Keeping API and UI in sync
+
+When adding or changing an API endpoint, update the React UI in `ui/` to
+expose the new capability from the browser.  Because the UI bundle is compiled
+into the Docker image during the multi-stage build, **any UI change requires a
+full image rebuild**:
+
+```bash
+docker compose up --build
+```
+
+The same applies to gateway-control-plane deployments: the `repo-compose`
+strategy always runs `docker compose up --build` from a fresh checkout, so
+both the updated API code **and** the updated `ui/` source must be present in
+the repository before the deploy is triggered.
+
 ### Running the UI in development (hot-reload)
 
 ```bash
