@@ -1,3 +1,13 @@
+# ── Stage 1: build the React/TypeScript UI ───────────────────────────────────
+FROM node:20-alpine AS ui-builder
+
+WORKDIR /ui
+COPY ui/package.json ui/package-lock.json* ./
+RUN npm ci --prefer-offline
+COPY ui/ ./
+RUN npm run build
+
+# ── Stage 2: API service + built UI ──────────────────────────────────────────
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -25,6 +35,9 @@ COPY requirements.txt .
 RUN python3 -m pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./app/
+
+# Copy the pre-built UI so FastAPI can serve it from /
+COPY --from=ui-builder /ui/dist ./app/static/
 
 EXPOSE 5201
 

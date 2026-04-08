@@ -15,9 +15,46 @@ The service is published on port **5201** (override with `HOST_PORT`).
 # Health check
 curl http://localhost:5201/api/health
 
+# Local test UI (served by the same container)
+open http://localhost:5201/
+
 # Interactive API docs
 open http://localhost:5201/docs
 ```
+
+## Local test UI
+
+A Vite + React + TypeScript single-page app ships inside the Docker image and
+is served from the root path (`/`) by the FastAPI process:
+
+| Feature | Details |
+|---|---|
+| Service status panel | Polls `/api/health` and `/api/info` every 10 s; shows SAM variant, GPU readiness, VRAM metrics |
+| Image workspace | Drag-and-drop upload (PNG · JPEG · WebP), thumbnail preview, dimensions/format/size metadata, replace and clear actions |
+
+### Running the UI in development (hot-reload)
+
+```bash
+# Terminal 1 – start the API (model warmup runs in background)
+docker compose up
+
+# Terminal 2 – start the Vite dev server (proxies /api/* to localhost:5201)
+cd ui
+npm install
+npm run dev
+# open http://localhost:5173
+```
+
+### Building the UI standalone
+
+```bash
+cd ui
+npm install
+npm run build    # output written to ui/dist/
+```
+
+The `docker compose up --build` command already runs this build step automatically
+via the multi-stage Dockerfile; no manual build is required for the Docker workflow.
 
 ## Environment variables
 
