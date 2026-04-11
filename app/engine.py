@@ -1,5 +1,6 @@
 """SAM engine: thread-safe singleton that loads Meta SAM on startup."""
 
+import gc
 import logging
 import os
 import threading
@@ -29,10 +30,12 @@ class SAMEngine:
 
     def __init__(self) -> None:
         self._ready = False
-        self._load_started = False
         self._load_lock = threading.Lock()
+        self._load_condition = threading.Condition(self._load_lock)
+        self._loading = False
         self._predict_lock = threading.Lock()
 
+        self._sam: Any = None
         self._predictor: Any = None
         self._auto_generator: Any = None
 
@@ -48,14 +51,54 @@ class SAMEngine:
 
     def load(self) -> None:
         """Load model weights.  Idempotent; safe to call from multiple threads."""
-        with self._load_lock:
-            if self._load_started:
+        with self._load_condition:
+            if self._ready or self._loading:
                 return
-            self._load_started = True
+            self._loading = True
+            self._load_error = None
+            self._start_time = time.time()
 
         # Actual loading is done outside the short critical section so the lock
         # is not held during the (potentially minutes-long) download + load.
-        self._do_load()
+        try:
+            self._do_load()
+        finally:
+            with self._load_condition:
+                self._loading = False
+                self._load_condition.notify_all()
+
+    def ensure_ready(self) -> None:
+        """Block until the model is ready, loading it on-demand when needed."""
+        self.load()
+        with self._load_condition:
+            while self._loading and not self._ready and self._load_error is None:
+                self._load_condition.wait()
+            if not self._ready:
+                raise RuntimeError(self._load_error or "Model not ready")
+
+    def unload(self) -> None:
+        """Release the SAM model so the next request lazily reloads it."""
+        with self._load_condition:
+            if self._loading:
+                raise RuntimeError("Model is still loading")
+            sam = self._sam
+            predictor = self._predictor
+            auto_generator = self._auto_generator
+            if sam is None and predictor is None and auto_generator is None:
+                return
+            self._sam = None
+            self._predictor = None
+            self._auto_generator = None
+            self._ready = False
+            self._load_error = None
+
+        with self._predict_lock:
+            del sam
+            del predictor
+            del auto_generator
+            gc.collect()
+            self._release_cuda_memory()
+            logger.info("Unloaded SAM model to free VRAM")
 
     def predict(
         self,
@@ -66,6 +109,7 @@ class SAMEngine:
         multimask_output: bool = True,
     ):
         """Run prompted SAM prediction.  Thread-safe (serialized internally)."""
+        self.ensure_ready()
         with self._predict_lock:
             self._predictor.set_image(image)
             return self._predictor.predict(
@@ -77,6 +121,7 @@ class SAMEngine:
 
     def predict_auto(self, image: np.ndarray) -> List[Dict[str, Any]]:
         """Run automatic mask generation.  Thread-safe (serialized internally)."""
+        self.ensure_ready()
         with self._predict_lock:
             return self._auto_generator.generate(image)
 
@@ -87,6 +132,10 @@ class SAMEngine:
     @property
     def ready(self) -> bool:
         return self._ready
+
+    @property
+    def loading(self) -> bool:
+        return self._loading
 
     @property
     def model_variant(self) -> str:
@@ -167,15 +216,35 @@ class SAMEngine:
             sam = sam_model_registry[variant](checkpoint=str(checkpoint_path))
             sam.to(self._device)
 
-            self._predictor = SamPredictor(sam)
-            self._auto_generator = SamAutomaticMaskGenerator(sam)
-            self._ready = True
+            predictor = SamPredictor(sam)
+            auto_generator = SamAutomaticMaskGenerator(sam)
+            with self._load_condition:
+                self._sam = sam
+                self._predictor = predictor
+                self._auto_generator = auto_generator
+                self._ready = True
+                self._load_error = None
             logger.info(
                 "SAM model ready in %.1f s", time.time() - self._start_time
             )
         except Exception as exc:
             logger.exception("Failed to load SAM model: %s", exc)
-            self._load_error = str(exc)
+            with self._load_condition:
+                self._sam = None
+                self._predictor = None
+                self._auto_generator = None
+                self._ready = False
+                self._load_error = str(exc)
+
+    def _release_cuda_memory(self) -> None:
+        try:
+            import torch  # noqa: PLC0415
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+        except Exception:
+            logger.debug("CUDA cache release skipped", exc_info=True)
 
     def _download_checkpoint(self, variant: str, dest: Path) -> None:
         import requests  # noqa: PLC0415

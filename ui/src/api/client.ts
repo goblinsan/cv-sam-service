@@ -43,6 +43,14 @@ export function fetchInfo(): Promise<InfoResponse> {
   return get<InfoResponse>('/info')
 }
 
+export async function unloadModel(): Promise<void> {
+  const res = await fetch(`${BASE}/model/unload`, { method: 'POST' })
+  if (!res.ok) {
+    const detail = await res.text()
+    throw new Error(`POST /model/unload → ${res.status}: ${detail}`)
+  }
+}
+
 export interface SegmentParams {
   image: File;
   pointCoords?: [number, number][];

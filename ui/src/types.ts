@@ -1,12 +1,14 @@
 export interface HealthResponse {
   status: string;
   ready: boolean;
+  loading: boolean;
   model_variant: string;
   load_error: string | null;
 }
 
 export interface InfoResponse {
   ready: boolean;
+  loading: boolean;
   model_variant: string;
   device: string | null;
   device_name: string | null;

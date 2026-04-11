@@ -1,6 +1,6 @@
-"""GET /api/health and GET /api/info endpoints."""
+"""GET /api/health, GET /api/info, and model lifecycle endpoints."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app.engine import get_engine
 from app.schemas import HealthResponse, InfoResponse
@@ -21,6 +21,7 @@ def health() -> HealthResponse:
     return HealthResponse(
         status="ok",
         ready=engine.ready,
+        loading=engine.loading,
         model_variant=engine.model_variant,
         load_error=engine.load_error,
     )
@@ -33,6 +34,7 @@ def info() -> InfoResponse:
     vram = engine.vram_info()
     return InfoResponse(
         ready=engine.ready,
+        loading=engine.loading,
         model_variant=engine.model_variant,
         device=engine.device,
         device_name=vram.get("device_name"),
@@ -41,3 +43,14 @@ def info() -> InfoResponse:
         vram_allocated_mb=vram.get("vram_allocated_mb"),
         load_error=engine.load_error,
     )
+
+
+@router.post("/model/unload", status_code=200)
+def unload_model() -> dict[str, bool]:
+    """Release SAM VRAM reservations; the next request reloads the model lazily."""
+    engine = get_engine()
+    try:
+        engine.unload()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"ok": True, "ready": engine.ready, "loading": engine.loading}

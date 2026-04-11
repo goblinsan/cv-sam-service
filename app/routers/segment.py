@@ -99,8 +99,10 @@ async def segment(
     publicly reachable URL (``image_url`` query parameter).
     """
     engine = get_engine()
-    if not engine.ready:
-        raise HTTPException(status_code=503, detail="Model not ready – please retry shortly")
+    try:
+        engine.ensure_ready()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     if output_format not in ("masks", "polygons", "both"):
         raise HTTPException(
@@ -188,8 +190,10 @@ async def segment_auto(
     publicly reachable URL (``image_url`` query parameter).
     """
     engine = get_engine()
-    if not engine.ready:
-        raise HTTPException(status_code=503, detail="Model not ready – please retry shortly")
+    try:
+        engine.ensure_ready()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     if output_format not in ("masks", "polygons", "both"):
         raise HTTPException(

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { fetchHealth, fetchInfo } from '../api/client'
+import { fetchHealth, fetchInfo, unloadModel } from '../api/client'
 import type { HealthResponse, InfoResponse } from '../types'
 
 const POLL_INTERVAL_MS = 10_000
@@ -13,6 +13,7 @@ export function StatusPanel() {
   const [info, setInfo] = useState<InfoResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [lastFetch, setLastFetch] = useState<Date | null>(null)
+  const [unloading, setUnloading] = useState(false)
 
   const refresh = useCallback(async () => {
     try {
@@ -33,7 +34,19 @@ export function StatusPanel() {
   }, [refresh])
 
   const readyClass = health?.ready ? 'badge badge--ready' : 'badge badge--warming'
-  const readyLabel = health?.ready ? 'Ready' : 'Warming up'
+  const readyLabel = health?.ready ? 'Ready' : health?.loading ? 'Loading' : 'Unloaded / lazy'
+
+  const handleUnload = useCallback(async () => {
+    setUnloading(true)
+    try {
+      await unloadModel()
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setUnloading(false)
+    }
+  }, [refresh])
 
   return (
     <section className="panel status-panel">
@@ -47,6 +60,9 @@ export function StatusPanel() {
           )}
           <button className="btn btn--sm" onClick={() => void refresh()}>
             Refresh
+          </button>
+          <button className="btn btn--sm btn--danger" onClick={() => void handleUnload()} disabled={unloading}>
+            {unloading ? 'Releasing…' : 'Unload VRAM'}
           </button>
         </div>
       </header>
@@ -87,6 +103,12 @@ export function StatusPanel() {
             <div className="status-item status-item--full">
               <span className="status-item__label">Load error</span>
               <span className="error-msg">{health.load_error}</span>
+            </div>
+          )}
+          {!health.ready && !health.loading && (
+            <div className="status-item status-item--full">
+              <span className="status-item__label">Model lifecycle</span>
+              <span>The next segment request will lazily reload SAM onto the GPU.</span>
             </div>
           )}
         </div>

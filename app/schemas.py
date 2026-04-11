@@ -13,12 +13,14 @@ from pydantic import BaseModel, Field
 class HealthResponse(BaseModel):
     status: str = Field("ok", description="Always 'ok' while the process is running")
     ready: bool = Field(..., description="True once the SAM model is fully loaded")
+    loading: bool = Field(False, description="True while the SAM model is actively loading")
     model_variant: str = Field(..., description="SAM model variant in use (vit_b, vit_l, vit_h)")
     load_error: Optional[str] = Field(None, description="Error message if model loading failed")
 
 
 class InfoResponse(BaseModel):
     ready: bool
+    loading: bool = False
     model_variant: str
     device: Optional[str] = None
     device_name: Optional[str] = None
