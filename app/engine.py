@@ -45,6 +45,23 @@ class SAMEngine:
         self._load_error: Optional[str] = None
         self._start_time: float = time.time()
 
+        # VRAM idle-unload (mirrors pyannote pattern in stt-service).  When
+        # ``CV_SAM_IDLE_UNLOAD_SEC`` > 0, a daemon thread unloads the SAM model
+        # after that many seconds of inactivity, freeing ~2 GB of VRAM until
+        # the next request lazily reloads it.
+        try:
+            self._idle_unload_sec: int = int(
+                os.environ.get("CV_SAM_IDLE_UNLOAD_SEC", "0")
+            )
+        except ValueError:
+            logger.warning(
+                "Invalid CV_SAM_IDLE_UNLOAD_SEC=%r; disabling idle-unload",
+                os.environ.get("CV_SAM_IDLE_UNLOAD_SEC"),
+            )
+            self._idle_unload_sec = 0
+        self._last_used: float = time.monotonic()
+        self._reaper_thread: Optional[threading.Thread] = None
+
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
@@ -93,6 +110,34 @@ class SAMEngine:
             self._load_error = None
 
         with self._predict_lock:
+            # Clear any image features the predictor has cached on GPU.  Without
+            # this the SamPredictor keeps tensors referenced internally and
+            # ``torch.cuda.empty_cache()`` cannot reclaim the blocks.
+            try:
+                if predictor is not None and hasattr(predictor, "reset_image"):
+                    predictor.reset_image()
+            except Exception:
+                logger.debug(
+                    "predictor.reset_image() failed during unload",
+                    exc_info=True,
+                )
+
+            # Move SAM weights off the GPU before dropping references.  Just
+            # ``del``-ing the python objects is not enough: PyTorch's caching
+            # allocator only returns blocks to the OS once the underlying
+            # tensors are released, and `sam.to("cpu")` is the most reliable
+            # way to force that release for every submodule (image_encoder,
+            # prompt_encoder, mask_decoder).  Observed effect on a tags-node
+            # RTX 4060: cv-sam process drops from ~2.1 GiB to ~0.3 GiB
+            # (the residual is the unavoidable per-process CUDA context).
+            try:
+                if sam is not None and hasattr(sam, "to"):
+                    sam.to("cpu")
+            except Exception:
+                logger.debug(
+                    "sam.to('cpu') failed during unload", exc_info=True,
+                )
+
             del sam
             del predictor
             del auto_generator
@@ -112,18 +157,24 @@ class SAMEngine:
         self.ensure_ready()
         with self._predict_lock:
             self._predictor.set_image(image)
-            return self._predictor.predict(
-                point_coords=point_coords,
-                point_labels=point_labels,
-                box=box,
-                multimask_output=multimask_output,
-            )
+            try:
+                return self._predictor.predict(
+                    point_coords=point_coords,
+                    point_labels=point_labels,
+                    box=box,
+                    multimask_output=multimask_output,
+                )
+            finally:
+                self._last_used = time.monotonic()
 
     def predict_auto(self, image: np.ndarray) -> List[Dict[str, Any]]:
         """Run automatic mask generation.  Thread-safe (serialized internally)."""
         self.ensure_ready()
         with self._predict_lock:
-            return self._auto_generator.generate(image)
+            try:
+                return self._auto_generator.generate(image)
+            finally:
+                self._last_used = time.monotonic()
 
     # ------------------------------------------------------------------
     # Properties
@@ -224,9 +275,11 @@ class SAMEngine:
                 self._auto_generator = auto_generator
                 self._ready = True
                 self._load_error = None
+                self._last_used = time.monotonic()
             logger.info(
                 "SAM model ready in %.1f s", time.time() - self._start_time
             )
+            self._ensure_reaper()
         except Exception as exc:
             logger.exception("Failed to load SAM model: %s", exc)
             with self._load_condition:
@@ -245,6 +298,66 @@ class SAMEngine:
                 torch.cuda.ipc_collect()
         except Exception:
             logger.debug("CUDA cache release skipped", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Idle-unload reaper
+    # ------------------------------------------------------------------
+
+    def _ensure_reaper(self) -> None:
+        """Start the idle-unload daemon thread on first successful load.
+
+        No-op when ``CV_SAM_IDLE_UNLOAD_SEC`` is 0 (disabled) or the reaper
+        is already running.
+        """
+        if self._idle_unload_sec <= 0:
+            return
+        if self._reaper_thread is not None and self._reaper_thread.is_alive():
+            return
+        t = threading.Thread(
+            target=self._reaper,
+            args=(self._idle_unload_sec,),
+            daemon=True,
+            name="cv-sam-reaper",
+        )
+        t.start()
+        self._reaper_thread = t
+        logger.info(
+            "SAM idle-unload reaper started (timeout=%ds)",
+            self._idle_unload_sec,
+        )
+
+    def _reaper(self, idle_timeout_sec: int) -> None:
+        """Background thread: unload SAM after it has been idle long enough."""
+        # Wake at most every 10 s, but no less often than 1/6th of the timeout
+        # so we never miss the deadline by more than ~17% (matches the
+        # pyannote reaper in stt-service).
+        _REAPER_MIN_SLEEP_SEC = 10
+        _REAPER_FRACTION = 6
+        sleep_sec = max(
+            _REAPER_MIN_SLEEP_SEC, idle_timeout_sec // _REAPER_FRACTION
+        )
+        while True:
+            time.sleep(sleep_sec)
+            try:
+                with self._load_condition:
+                    if not self._ready or self._loading:
+                        continue
+                    idle = time.monotonic() - self._last_used
+                if idle >= idle_timeout_sec:
+                    logger.info(
+                        "SAM idle for %.0fs (limit %ds) — unloading to free VRAM",
+                        idle, idle_timeout_sec,
+                    )
+                    try:
+                        self.unload()
+                    except RuntimeError:
+                        # Concurrent load won the race; try again next tick.
+                        logger.debug(
+                            "Skipped idle-unload: model is loading",
+                            exc_info=True,
+                        )
+            except Exception:
+                logger.exception("SAM reaper iteration failed; continuing")
 
     def _download_checkpoint(self, variant: str, dest: Path) -> None:
         import requests  # noqa: PLC0415
