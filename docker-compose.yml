@@ -9,6 +9,7 @@ services:
       - CV_SAM_VARIANT=${CV_SAM_VARIANT:-vit_b}
       - MODEL_DIR=${MODEL_DIR:-/data/models/sam}
       - CV_SAM_IDLE_UNLOAD_SEC=${CV_SAM_IDLE_UNLOAD_SEC:-0}
+      - CV_SAM_DEVICE=${CV_SAM_DEVICE:-auto}
     volumes:
       - "${MODELS_HOST_DIR:-/data/models}:/data/models"
     deploy:

@@ -246,9 +246,25 @@ class SAMEngine:
                 sam_model_registry,
             )
 
-            self._device = "cuda" if torch.cuda.is_available() else "cpu"
+            requested = os.environ.get("CV_SAM_DEVICE", "auto").strip().lower()
+            if requested not in {"auto", "cuda", "cpu"}:
+                logger.warning(
+                    "Invalid CV_SAM_DEVICE=%r; falling back to 'auto'",
+                    requested,
+                )
+                requested = "auto"
+            if requested == "cuda":
+                if not torch.cuda.is_available():
+                    raise RuntimeError(
+                        "CV_SAM_DEVICE=cuda but torch.cuda.is_available() is False"
+                    )
+                self._device = "cuda"
+            elif requested == "cpu":
+                self._device = "cpu"
+            else:
+                self._device = "cuda" if torch.cuda.is_available() else "cpu"
             if self._device == "cpu":
-                logger.warning("CUDA not available – running on CPU (slow)")
+                logger.warning("Running on CPU (slow); CV_SAM_DEVICE=%s", requested)
 
             variant = self._model_variant
             if variant not in _CHECKPOINT_URLS:
